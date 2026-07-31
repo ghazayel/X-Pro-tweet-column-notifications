@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Pro Column New-Tweet Notifier
 // @namespace    xpro-notifier
-// @version      1.4
+// @version      1.6
 // @description  Desktop popup notification whenever a new tweet appears in an X Pro (TweetDeck) column
 // @match        https://pro.x.com/*
 // @match        https://tweetdeck.twitter.com/*
@@ -29,6 +29,14 @@
 //      requires kebab-case CSS property names ("z-index"). This left
 //      z-index at its default "auto", so X Pro's own tweet content
 //      was stacking on top of the button. Fixed by using "z-index".
+// 1.5  Moved the 🔔 button/panel from bottom-right to top-right corner
+//      for better visibility alongside the columns.
+// 1.6  Added an experimental "Prevent tab throttling" toggle in the
+//      panel. When enabled, plays a near-silent, very-low-frequency
+//      audio tone via the Web Audio API, since browsers generally
+//      exempt tabs actively playing audio from background timer
+//      throttling. Off by default; requires one click/keypress on the
+//      page to unlock audio playback (browser autoplay policy).
 // ---------------------------------------------------------------------
 
 (function () {
@@ -65,6 +73,67 @@
   }
 
   let enabledTitles = loadEnabledSet(); // Set of titles, or null if user hasn't set up yet
+
+  // ---------------------------------------------------------------------
+  // Experimental: silent audio "keep-alive" to discourage the browser from
+  // throttling this tab when it's in the background. Browsers generally
+  // exempt tabs actively playing audio from background timer throttling.
+  // Off by default; toggled from the settings panel.
+  // ---------------------------------------------------------------------
+  const KEEPALIVE_KEY = 'xproNotifierKeepAlive';
+  let keepAliveEnabled = localStorage.getItem(KEEPALIVE_KEY) === 'true';
+  let audioCtx = null;
+  let audioNodes = null;
+
+  function startKeepAlive() {
+    if (audioCtx) return; // already running
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      gain.gain.value = 0.0001; // effectively silent, but "playing"
+      oscillator.frequency.value = 20; // low, inaudible-ish frequency
+      oscillator.connect(gain);
+      gain.connect(audioCtx.destination);
+      oscillator.start();
+      audioNodes = { oscillator, gain };
+      console.log('[XPro Notifier] Keep-alive audio started.');
+    } catch (e) {
+      console.warn('[XPro Notifier] Could not start keep-alive audio:', e);
+    }
+  }
+
+  function stopKeepAlive() {
+    if (audioNodes) {
+      try { audioNodes.oscillator.stop(); } catch (e) {}
+      audioNodes = null;
+    }
+    if (audioCtx) {
+      audioCtx.close();
+      audioCtx = null;
+    }
+    console.log('[XPro Notifier] Keep-alive audio stopped.');
+  }
+
+  function setKeepAlive(enabled) {
+    keepAliveEnabled = enabled;
+    localStorage.setItem(KEEPALIVE_KEY, String(enabled));
+    if (enabled) startKeepAlive();
+    else stopKeepAlive();
+  }
+
+  // AudioContext requires a user gesture before it can produce sound in
+  // most browsers. Arm a one-time listener so the very first click/keypress
+  // anywhere on the page unlocks it, if the feature is enabled.
+  function armAudioUnlock() {
+    const unlock = () => {
+      if (keepAliveEnabled) startKeepAlive();
+      document.removeEventListener('click', unlock);
+      document.removeEventListener('keydown', unlock);
+    };
+    document.addEventListener('click', unlock, { once: true });
+    document.addEventListener('keydown', unlock, { once: true });
+  }
 
   function isColumnEnabled(title) {
     // Nothing is tracked until the user explicitly checks it in the panel.
@@ -176,7 +245,7 @@
     btn.id = 'xpro-notifier-btn';
     btn.textContent = '🔔';
     forceStyle(btn, {
-      position: 'fixed', bottom: '20px', right: '20px', 'z-index': '2147483647',
+      position: 'fixed', top: '20px', right: '20px', 'z-index': '2147483647',
       width: '44px', height: '44px', 'border-radius': '50%',
       background: '#1d9bf0', color: '#fff', display: 'flex',
       'align-items': 'center', 'justify-content': 'center', 'font-size': '20px',
@@ -186,7 +255,7 @@
     const panel = document.createElement('div');
     panel.id = 'xpro-notifier-panel';
     forceStyle(panel, {
-      position: 'fixed', bottom: '72px', right: '20px', 'z-index': '2147483647',
+      position: 'fixed', top: '72px', right: '20px', 'z-index': '2147483647',
       width: '280px', 'max-height': '400px', 'overflow-y': 'auto',
       background: '#15202b', color: '#fff', border: '1px solid #38444d',
       'border-radius': '8px', padding: '12px', 'font-family': 'sans-serif',
@@ -204,6 +273,11 @@
       panel.innerHTML = `
         <div style="font-weight:bold; margin-bottom:8px;">Track which columns?</div>
         <div id="xpro-notifier-list"></div>
+        <hr style="border-color:#38444d; margin:10px 0;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="xpro-keepalive-toggle">
+          <span>Prevent tab throttling (experimental, plays silent audio)</span>
+        </label>
         <div style="display:flex; gap:8px; margin-top:10px;">
           <button id="xpro-refresh" style="flex:1; padding:6px; cursor:pointer;">↻ Refresh list</button>
           <button id="xpro-close" style="flex:1; padding:6px; cursor:pointer;">Close</button>
@@ -233,6 +307,10 @@
         });
       }
 
+      const keepAliveBox = panel.querySelector('#xpro-keepalive-toggle');
+      keepAliveBox.checked = keepAliveEnabled;
+      keepAliveBox.addEventListener('change', () => setKeepAlive(keepAliveBox.checked));
+
       panel.querySelector('#xpro-refresh').addEventListener('click', renderPanel);
       panel.querySelector('#xpro-close').addEventListener('click', () => {
         panel.style.setProperty('display', 'none', 'important');
@@ -258,6 +336,7 @@
 
     baseline();
     buildPanel();
+    armAudioUnlock();
 
     const observer = new MutationObserver(scheduleScan);
     observer.observe(document.body, { childList: true, subtree: true });
