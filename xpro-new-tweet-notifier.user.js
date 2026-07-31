@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Pro Column New-Tweet Notifier
 // @namespace    xpro-notifier
-// @version      1.2
+// @version      1.3
 // @description  Desktop popup notification whenever a new tweet appears in an X Pro (TweetDeck) column
 // @match        https://pro.x.com/*
 // @match        https://tweetdeck.twitter.com/*
@@ -18,6 +18,11 @@
 //      to track, saved in localStorage. Defaulted to "all enabled".
 // 1.2  Changed default so all columns start UNCHECKED — user must
 //      opt in per column instead of opting out.
+// 1.3  Fixed 🔔 button/panel not appearing on some pages: attached to
+//      <html> instead of <body>, and forced position/z-index with
+//      !important so page CSS (e.g. transforms breaking `fixed`
+//      positioning) can't hide or mis-place it. Added a console log
+//      of the button's bounding rect for easier debugging.
 // ---------------------------------------------------------------------
 
 (function () {
@@ -154,26 +159,32 @@
     return [...new Set(titles)];
   }
 
+  function forceStyle(el, styles) {
+    Object.entries(styles).forEach(([prop, value]) => {
+      el.style.setProperty(prop, value, 'important');
+    });
+  }
+
   function buildPanel() {
     const btn = document.createElement('div');
     btn.id = 'xpro-notifier-btn';
     btn.textContent = '🔔';
-    Object.assign(btn.style, {
-      position: 'fixed', bottom: '20px', right: '20px', zIndex: 999999,
-      width: '44px', height: '44px', borderRadius: '50%',
+    forceStyle(btn, {
+      position: 'fixed', bottom: '20px', right: '20px', zIndex: '2147483647',
+      width: '44px', height: '44px', 'border-radius': '50%',
       background: '#1d9bf0', color: '#fff', display: 'flex',
-      alignItems: 'center', justifyContent: 'center', fontSize: '20px',
-      cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+      'align-items': 'center', 'justify-content': 'center', 'font-size': '20px',
+      cursor: 'pointer', 'box-shadow': '0 2px 8px rgba(0,0,0,0.3)',
     });
 
     const panel = document.createElement('div');
     panel.id = 'xpro-notifier-panel';
-    Object.assign(panel.style, {
-      position: 'fixed', bottom: '72px', right: '20px', zIndex: 999999,
-      width: '280px', maxHeight: '400px', overflowY: 'auto',
+    forceStyle(panel, {
+      position: 'fixed', bottom: '72px', right: '20px', zIndex: '2147483647',
+      width: '280px', 'max-height': '400px', 'overflow-y': 'auto',
       background: '#15202b', color: '#fff', border: '1px solid #38444d',
-      borderRadius: '8px', padding: '12px', fontFamily: 'sans-serif',
-      fontSize: '14px', display: 'none', boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+      'border-radius': '8px', padding: '12px', 'font-family': 'sans-serif',
+      'font-size': '14px', display: 'none', 'box-shadow': '0 4px 16px rgba(0,0,0,0.4)',
     });
 
     function renderPanel() {
@@ -217,17 +228,21 @@
       }
 
       panel.querySelector('#xpro-refresh').addEventListener('click', renderPanel);
-      panel.querySelector('#xpro-close').addEventListener('click', () => { panel.style.display = 'none'; });
+      panel.querySelector('#xpro-close').addEventListener('click', () => {
+        panel.style.setProperty('display', 'none', 'important');
+      });
     }
 
     btn.addEventListener('click', () => {
       const isOpen = panel.style.display === 'block';
-      panel.style.display = isOpen ? 'none' : 'block';
+      panel.style.setProperty('display', isOpen ? 'none' : 'block', 'important');
       if (!isOpen) renderPanel();
     });
 
-    document.body.appendChild(btn);
-    document.body.appendChild(panel);
+    document.documentElement.appendChild(btn);
+    document.documentElement.appendChild(panel);
+
+    console.log('[XPro Notifier] Button rect:', btn.getBoundingClientRect());
   }
 
   function init() {
