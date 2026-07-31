@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Pro Column New-Tweet Notifier
 // @namespace    xpro-notifier
-// @version      1.6
+// @version      1.7
 // @description  Desktop popup notification whenever a new tweet appears in an X Pro (TweetDeck) column
 // @match        https://pro.x.com/*
 // @match        https://tweetdeck.twitter.com/*
@@ -37,6 +37,10 @@
 //      exempt tabs actively playing audio from background timer
 //      throttling. Off by default; requires one click/keypress on the
 //      page to unlock audio playback (browser autoplay policy).
+// 1.7  Increased startup delay from 3s to 15s before taking the
+//      baseline snapshot of existing tweets, to give slower-loading
+//      columns time to fully populate first — avoids treating tweets
+//      that were still loading in as "new."
 // ---------------------------------------------------------------------
 
 (function () {
@@ -49,7 +53,7 @@
   // ---------------------------------------------------------------------
   const COLUMN_SELECTOR = '[data-testid="multi-column"] > div, section[role="region"]';
   const TWEET_SELECTOR  = 'article[data-testid="tweet"]';
-  const STARTUP_DELAY_MS = 3000;   // wait for columns to finish initial load
+  const STARTUP_DELAY_MS = 15000;  // wait for columns to finish initial load
   const DEBOUNCE_MS      = 500;    // wait for DOM to settle before re-scanning
   const STORAGE_KEY      = 'xproNotifierEnabledColumns';
 
