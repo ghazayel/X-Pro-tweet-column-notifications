@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Pro Column New-Tweet Notifier
 // @namespace    xpro-notifier
-// @version      1.3
+// @version      1.4
 // @description  Desktop popup notification whenever a new tweet appears in an X Pro (TweetDeck) column
 // @match        https://pro.x.com/*
 // @match        https://tweetdeck.twitter.com/*
@@ -23,6 +23,12 @@
 //      !important so page CSS (e.g. transforms breaking `fixed`
 //      positioning) can't hide or mis-place it. Added a console log
 //      of the button's bounding rect for easier debugging.
+// 1.4  Actual root-cause fix for the invisible button: the z-index
+//      style was set using the camelCase key "zIndex" with
+//      style.setProperty(), which silently fails — setProperty()
+//      requires kebab-case CSS property names ("z-index"). This left
+//      z-index at its default "auto", so X Pro's own tweet content
+//      was stacking on top of the button. Fixed by using "z-index".
 // ---------------------------------------------------------------------
 
 (function () {
@@ -170,7 +176,7 @@
     btn.id = 'xpro-notifier-btn';
     btn.textContent = '🔔';
     forceStyle(btn, {
-      position: 'fixed', bottom: '20px', right: '20px', zIndex: '2147483647',
+      position: 'fixed', bottom: '20px', right: '20px', 'z-index': '2147483647',
       width: '44px', height: '44px', 'border-radius': '50%',
       background: '#1d9bf0', color: '#fff', display: 'flex',
       'align-items': 'center', 'justify-content': 'center', 'font-size': '20px',
@@ -180,7 +186,7 @@
     const panel = document.createElement('div');
     panel.id = 'xpro-notifier-panel';
     forceStyle(panel, {
-      position: 'fixed', bottom: '72px', right: '20px', zIndex: '2147483647',
+      position: 'fixed', bottom: '72px', right: '20px', 'z-index': '2147483647',
       width: '280px', 'max-height': '400px', 'overflow-y': 'auto',
       background: '#15202b', color: '#fff', border: '1px solid #38444d',
       'border-radius': '8px', padding: '12px', 'font-family': 'sans-serif',
