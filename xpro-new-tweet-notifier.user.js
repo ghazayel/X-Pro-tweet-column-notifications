@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Pro Column New-Tweet Notifier
 // @namespace    xpro-notifier
-// @version      1.7
+// @version      1.9
 // @description  Desktop popup notification whenever a new tweet appears in an X Pro (TweetDeck) column
 // @match        https://pro.x.com/*
 // @match        https://tweetdeck.twitter.com/*
@@ -41,6 +41,20 @@
 //      baseline snapshot of existing tweets, to give slower-loading
 //      columns time to fully populate first — avoids treating tweets
 //      that were still loading in as "new."
+// 1.8  Fixed notifications never stopping / repeatedly firing for
+//      already-seen tweets: column identity was based on DOM node +
+//      index (a dataset attribute stashed on the column element).
+//      Virtualized list re-renders can recreate that element, losing
+//      the attribute and effectively resetting the "seen" tracking
+//      for that column. Column identity is now based on the column's
+//      title text instead, which persists across re-renders. Assumes
+//      column titles are unique (typical setup).
+// 1.9  Clicking a notification now scrolls straight to the original
+//      tweet in its column (briefly highlighted) instead of just
+//      focusing the tab. Keeps a capped-size map of recent notified
+//      tweets' DOM elements; if X Pro's virtualized list has since
+//      recycled that element (e.g. scrolled far past it), falls back
+//      to just focusing the tab.
 // ---------------------------------------------------------------------
 
 (function () {
@@ -58,6 +72,34 @@
   const STORAGE_KEY      = 'xproNotifierEnabledColumns';
 
   const seenTweets = new Map(); // columnId -> Set of tweet ids seen so far
+
+  // Keep references to the DOM elements of tweets we've notified about, so a
+  // notification click can scroll straight to the tweet instead of just
+  // focusing the tab. Capped in size since X Pro can recycle/remove far
+  // scrolled-past elements anyway (virtualized lists).
+  const notifiedTweetElements = new Map(); // tweetId -> element
+  const MAX_TRACKED_ELEMENTS = 200;
+
+  function rememberTweetElement(id, el) {
+    notifiedTweetElements.set(id, el);
+    if (notifiedTweetElements.size > MAX_TRACKED_ELEMENTS) {
+      const oldestKey = notifiedTweetElements.keys().next().value;
+      notifiedTweetElements.delete(oldestKey);
+    }
+  }
+
+  function goToTweet(id) {
+    window.focus();
+    const el = notifiedTweetElements.get(id);
+    if (el && document.contains(el)) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const originalOutline = el.style.outline;
+      el.style.outline = '2px solid #1d9bf0';
+      setTimeout(() => { el.style.outline = originalOutline; }, 2000);
+    } else {
+      console.log('[XPro Notifier] Original tweet element no longer in the DOM (likely scrolled out / recycled).');
+    }
+  }
 
   // ---------------------------------------------------------------------
   // Which-columns-to-track persistence (keyed by column title, since that's
@@ -157,25 +199,32 @@
     return header ? header.textContent.trim() : fallback;
   }
 
-  function notify(title, body) {
+  function notify(title, body, tweetId) {
     if (Notification.permission === 'granted') {
       const n = new Notification(title, { body, silent: false });
-      // Optional: clicking the notification focuses the X Pro tab
-      n.onclick = () => window.focus();
+      n.onclick = () => {
+        if (tweetId) goToTweet(tweetId);
+        else window.focus();
+      };
     }
   }
 
-  function getColumnId(col, idx) {
-    if (!col.dataset.notifierId) col.dataset.notifierId = `col-${idx}`;
-    return col.dataset.notifierId;
+  function getColumnKey(col, fallbackIdx) {
+    // Column title is a far more stable identity than DOM position/node
+    // identity, since virtualized lists can recreate column wrapper nodes
+    // (and therefore lose any dataset attribute we'd stashed on them),
+    // which was causing already-seen tweets to be re-tracked as new.
+    // NOTE: assumes column titles are unique, which holds for typical
+    // X Pro / TweetDeck setups (each column usually has a distinct name).
+    return getColumnTitle(col, `Column ${fallbackIdx + 1}`);
   }
 
   // First pass: just record what's already there, don't notify
   // (otherwise you'd get a flood of notifications the moment the script loads).
   function baseline() {
     document.querySelectorAll(COLUMN_SELECTOR).forEach((col, idx) => {
-      const colId = getColumnId(col, idx);
-      const seen = new Set();
+      const colId = getColumnKey(col, idx);
+      const seen = seenTweets.get(colId) || new Set();
       col.querySelectorAll(TWEET_SELECTOR).forEach((t) => {
         const id = getTweetId(t);
         if (id) seen.add(id);
@@ -186,10 +235,10 @@
 
   function scanForNewTweets() {
     document.querySelectorAll(COLUMN_SELECTOR).forEach((col, idx) => {
-      const colId = getColumnId(col, idx);
+      const colId = getColumnKey(col, idx);
 
       if (!seenTweets.has(colId)) {
-        // Newly appeared column (e.g. user just added it) - baseline it silently.
+        // Genuinely new column (e.g. user just added it) - baseline it silently.
         const seen = new Set();
         col.querySelectorAll(TWEET_SELECTOR).forEach((t) => {
           const id = getTweetId(t);
@@ -200,7 +249,7 @@
       }
 
       const seen = seenTweets.get(colId);
-      const title = getColumnTitle(col, 'X Pro column');
+      const title = colId; // colId IS the title now
 
       col.querySelectorAll(TWEET_SELECTOR).forEach((t) => {
         const id = getTweetId(t);
@@ -214,7 +263,8 @@
         const author = authorEl ? authorEl.textContent.trim().split('\n')[0] : 'New tweet';
         const text = textEl ? textEl.textContent.trim().slice(0, 140) : '';
 
-        notify(`${title} — ${author}`, text);
+        rememberTweetElement(id, t);
+        notify(`${title} — ${author}`, text, id);
       });
     });
   }
